@@ -136,10 +136,10 @@
 /* #undef HAVE_FSEEKO */
 
 /* Define to 1 if your compiler understands __func__. */
-#define HAVE_FUNCNAME__FUNC 1
+/* #undef HAVE_FUNCNAME__FUNC */
 
 /* Define to 1 if your compiler understands __FUNCTION__. */
-/* #undef HAVE_FUNCNAME__FUNCTION */
+#define HAVE_FUNCNAME__FUNCTION 1
 
 /* Define to 1 if you have the `getaddrinfo' function. */
 /* #undef HAVE_GETADDRINFO */

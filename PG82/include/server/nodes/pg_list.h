@@ -79,7 +79,7 @@ struct ListCell
  * arguments. Therefore, we implement them using GCC inline functions,
  * and as regular functions with non-GCC compilers.
  */
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(_MSC_VER)
 
 static __inline__ ListCell *
 list_head(List *l)

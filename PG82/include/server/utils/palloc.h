@@ -74,7 +74,7 @@ extern void *repalloc(void *pointer, Size size);
  * MemoryContextSwitchTo can't be a macro in standard C compilers.
  * But we can make it an inline function when using GCC.
  */
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(_MSC_VER)
 
 static __inline__ MemoryContext
 MemoryContextSwitchTo(MemoryContext context)

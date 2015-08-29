@@ -75,7 +75,11 @@
 #if defined(WIN32) || defined(__CYGWIN__)
 
 #ifdef BUILDING_DLL
+#ifndef _MSC_VER
 #define PGDLLIMPORT __declspec (dllexport)
+#else
+#define PGDLLIMPORT __declspec (dllimport)
+#endif
 #else							/* not BUILDING_DLL */
 #define PGDLLIMPORT __declspec (dllimport)
 #endif

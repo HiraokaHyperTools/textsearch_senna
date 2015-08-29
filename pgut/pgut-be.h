@@ -23,6 +23,12 @@
 
 #define PGDLLEXPORT		__declspec(dllexport)
 
+#endif
+
+#endif
+
+#ifdef _MSC_VER // pg_config_os.h uses this condition.
+
 /*
  * PG_MODULE_MAGIC and PG_FUNCTION_INFO_V1 macros seems to be broken.
  * It uses PGDLLIMPORT, but those objects are not imported from postgres
@@ -50,8 +56,6 @@ CppConcat(pg_finfo_,funcname) (void) \
 	return &my_finfo; \
 } \
 extern int no_such_variable
-
-#endif
 
 #endif
 
