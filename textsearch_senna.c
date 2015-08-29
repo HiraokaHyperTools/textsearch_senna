@@ -19,6 +19,9 @@
 #include "catalog/catalog.h"
 #include "catalog/index.h"
 #include "catalog/namespace.h"
+#if PG_VERSION_NUM >= 90100
+#include "catalog/pg_opclass.h"
+#endif
 #include "catalog/pg_type.h"
 #include "commands/tablecmds.h"
 #include "mb/pg_wchar.h"
@@ -26,6 +29,9 @@
 #include "nodes/parsenodes.h"
 #include "nodes/relation.h"
 #include "parser/parsetree.h"
+#if PG_VERSION_NUM >= 90100
+#include "storage/smgr.h"
+#endif
 
 #if PG_VERSION_NUM >= 80300
 #include "postmaster/syslogger.h"
@@ -156,6 +162,9 @@ PG_FUNCTION_INFO_V1(senna_getmulti);
 PG_FUNCTION_INFO_V1(senna_rescan);
 PG_FUNCTION_INFO_V1(senna_endscan);
 PG_FUNCTION_INFO_V1(senna_build);
+#if PG_VERSION_NUM >= 90100
+PG_FUNCTION_INFO_V1(senna_buildempty);
+#endif
 PG_FUNCTION_INFO_V1(senna_bulkdelete);
 PG_FUNCTION_INFO_V1(senna_vacuumcleanup);
 PG_FUNCTION_INFO_V1(senna_costestimate);
@@ -163,35 +172,39 @@ PG_FUNCTION_INFO_V1(senna_costestimate);
 PG_FUNCTION_INFO_V1(senna_options);
 #endif
 
-extern void PGUT_EXPORT _PG_init(void);
-extern void PGUT_EXPORT _PG_fini(void);
-extern Datum PGUT_EXPORT pg_sync_file(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_drop_index(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_reindex_index(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_contains(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_contained(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_restsel(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_insert(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_beginscan(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_gettuple(PG_FUNCTION_ARGS);
+extern void PGDLLEXPORT _PG_init(void);
+extern void PGDLLEXPORT _PG_fini(void);
+extern Datum PGDLLEXPORT pg_sync_file(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_drop_index(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_reindex_index(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_contains(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_contained(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_restsel(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_insert(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_beginscan(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_gettuple(PG_FUNCTION_ARGS);
 #if PG_VERSION_NUM >= 80400
-extern Datum PGUT_EXPORT senna_getbitmap(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_getbitmap(PG_FUNCTION_ARGS);
 #else
-extern Datum PGUT_EXPORT senna_getmulti(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_getmulti(PG_FUNCTION_ARGS);
 #endif
-extern Datum PGUT_EXPORT senna_rescan(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_endscan(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_build(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_bulkdelete(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_vacuumcleanup(PG_FUNCTION_ARGS);
-extern Datum PGUT_EXPORT senna_costestimate(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_rescan(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_endscan(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_build(PG_FUNCTION_ARGS);
+#if PG_VERSION_NUM >= 90100
+extern Datum PGDLLEXPORT senna_buildempty(PG_FUNCTION_ARGS);
+#endif
+extern Datum PGDLLEXPORT senna_bulkdelete(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_vacuumcleanup(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_costestimate(PG_FUNCTION_ARGS);
 #if PG_VERSION_NUM >= 80200
-extern Datum PGUT_EXPORT senna_options(PG_FUNCTION_ARGS);
+extern Datum PGDLLEXPORT senna_options(PG_FUNCTION_ARGS);
 #endif
 
 static char *SennaPath(const RelFileNode *rnode, bool istemp);
 static sen_encoding SennaEncoding(void);
 static sen_index *SennaIndexOpen(Relation index, int flags);
+static sen_index *SennaIndexCreate(Relation index);
 static void SennaIndexClose(Oid relid, const RelFileNode *rnode);
 static bool SennaRemove(const RelFileNode *rnode, bool istemp);
 static sen_query *SennaQuery(const char *key, size_t len);
@@ -222,9 +235,6 @@ RemoveRelations(DropStmt *drop)
 #endif
 
 #define STRATEGY_IS_LIKE(s)	((s) == 3 || (s) == 4)
-
-#define OPCLASS_IS_NORM(opr) 	(((opr)[0] || (opr)[1]) && !((opr)[2]) && !((opr)[3]))
-#define OPCLASS_IS_LIKE(opr) 	(((opr)[2] || (opr)[3]) && !((opr)[0]) && !((opr)[1]))
 
 #define FLAGS_NORM		(SEN_INDEX_NGRAM | SEN_INDEX_NORMALIZE)
 #define FLAGS_LIKE		(SEN_INDEX_NGRAM | SEN_INDEX_SPLIT_ALPHA | SEN_INDEX_SPLIT_DIGIT | SEN_INDEX_SPLIT_SYMBOL)
@@ -466,8 +476,9 @@ senna_restsel(PG_FUNCTION_ARGS)
 	}
 	else if (!IsA(other, Const))
 	{
+		bool	isdefault;
 		/* no idea if non-const... */
-		selec = 1.0 / get_variable_numdistinct(&vardata);
+		selec = 1.0 / get_variable_numdistinct(&vardata, &isdefault);
 	}
 	else if (((Const *) other)->constisnull)
 	{
@@ -794,8 +805,6 @@ senna_build(PG_FUNCTION_ARGS)
 	Relation	heap = (Relation) PG_GETARG_POINTER(0);
 	Relation	index = (Relation) PG_GETARG_POINTER(1);
 	IndexInfo  *indexInfo = (IndexInfo *) PG_GETARG_POINTER(2);
-	TupleDesc	tupdesc;
-	int			flags;
 
 	IndexBuildResult   *result;
 	SennaBuildState		state;
@@ -810,33 +819,7 @@ senna_build(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 				 errmsg("senna: do not support multi columns")));
 
-	/* FIXME: Relation->rd_operator is missing in 9.1 :-( */
-	if (OPCLASS_IS_NORM(index->rd_operator))
-		flags = FLAGS_NORM;
-	else if (OPCLASS_IS_LIKE(index->rd_operator))
-		flags = FLAGS_LIKE;
-	else
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("senna: unsupported operator class")));
-		flags = 0;	/* keep compilar quiet */
-	}
-
-	tupdesc = RelationGetDescr(index);
-	switch (tupdesc->attrs[0]->atttypid)
-	{
-		case BPCHAROID:
-		case VARCHAROID:
-		case TEXTOID:
-			break;
-		default:
-			ereport(ERROR,
-				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				 errmsg("senna: only supports char, varchar and text")));
-	}
-
-	state.index = SennaIndexOpen(index, flags);
+	state.index = SennaIndexCreate(index);
 
 	PG_TRY();
 	{
@@ -855,6 +838,21 @@ senna_build(PG_FUNCTION_ARGS)
 
 	PG_RETURN_POINTER(result);
 }
+
+#if PG_VERSION_NUM >= 90100
+/**
+ * senna_buildempty() -- ambuildempty
+ */
+Datum
+senna_buildempty(PG_FUNCTION_ARGS)
+{
+#ifdef NOT_USED
+	Relation	index = (Relation) PG_GETARG_POINTER(0);
+#endif
+
+	PG_RETURN_VOID();
+}
+#endif
 
 Datum
 senna_bulkdelete(PG_FUNCTION_ARGS)
@@ -974,11 +972,11 @@ senna_costestimate(PG_FUNCTION_ARGS)
 {
 	/*
 	 * We cannot use genericcostestimate because it is a static funciton.
-	 * Use gincostestimate instead, which just calls genericcostestimate.
+	 * Use gistcostestimate instead, which just calls genericcostestimate.
 	 * Actual estimation is done in senna_restsel, which is selectivity
 	 * functions for %% and @@ operator.
 	 */
-	return gincostestimate(fcinfo);
+	return gistcostestimate(fcinfo);
 }
 
 #if PG_VERSION_NUM >= 80400
@@ -1156,6 +1154,73 @@ SennaIndexOpen(Relation indexRelation, int flags)
 	pfree(path);
 
 	return index;
+}
+
+static sen_index *
+SennaIndexCreate(Relation index)
+{
+	TupleDesc	tupdesc;
+	int			flags;
+
+#if PG_VERSION_NUM >= 90100
+
+	Datum		indclassDatum;
+	bool		isnull;
+	oidvector  *indclass;
+	Oid			opclass;
+	HeapTuple	tp;
+	Form_pg_opclass opc;
+
+	indclassDatum = SysCacheGetAttr(INDEXRELID, index->rd_indextuple,
+									Anum_pg_index_indclass, &isnull);
+	Assert(!isnull);
+	indclass = (oidvector *) DatumGetPointer(indclassDatum);
+	opclass = indclass->values[0];
+
+	tp = SearchSysCache1(CLAOID, ObjectIdGetDatum(opclass));
+	if (!HeapTupleIsValid(tp))
+		elog(ERROR, "cache lookup failed for opclass %u", opclass);
+
+	opc = (Form_pg_opclass) GETSTRUCT(tp);
+	if (strcmp(opc->opcname.data, "like_ops") != 0)
+		flags = FLAGS_NORM;
+	else
+		flags = FLAGS_LIKE;
+
+	ReleaseSysCache(tp);
+#else
+
+#define OPCLASS_IS_NORM(opr) 	(((opr)[0] || (opr)[1]) && !((opr)[2]) && !((opr)[3]))
+#define OPCLASS_IS_LIKE(opr) 	(((opr)[2] || (opr)[3]) && !((opr)[0]) && !((opr)[1]))
+
+	if (OPCLASS_IS_NORM(index->rd_operator))
+		flags = FLAGS_NORM;
+	else if (OPCLASS_IS_LIKE(index->rd_operator))
+		flags = FLAGS_LIKE;
+	else
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("senna: unsupported operator class")));
+		flags = 0;	/* keep compilar quiet */
+	}
+
+#endif
+
+	tupdesc = RelationGetDescr(index);
+	switch (tupdesc->attrs[0]->atttypid)
+	{
+		case BPCHAROID:
+		case VARCHAROID:
+		case TEXTOID:
+			break;
+		default:
+			ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("senna: only supports char, varchar and text")));
+	}
+
+	return SennaIndexOpen(index, flags);
 }
 
 static void

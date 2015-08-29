@@ -33,11 +33,16 @@ text_to_cstring(const text *t)
 text *
 cstring_to_text(const char *s)
 {
-	int			len = strlen(s);
-	text	   *result = palloc(len + VARHDRSZ);
+	return cstring_to_text_with_len(s, strlen(s));
+}
 
-	SET_VARSIZE(result, len + VARHDRSZ);
-	memcpy(VARDATA(result), s, len);
+text *
+cstring_to_text_with_len(const char *s, int n)
+{
+	text	   *result = palloc(n + VARHDRSZ);
+
+	SET_VARSIZE(result, n + VARHDRSZ);
+	memcpy(VARDATA(result), s, n);
 
 	return result;
 }
@@ -47,6 +52,24 @@ tuplestore_putvalues(Tuplestorestate *state, TupleDesc tdesc,
 					 Datum *values, bool *isnull)
 {
 	tuplestore_puttuple(state, heap_form_tuple(tdesc, values, isnull));
+}
+
+Datum
+ExecFetchSlotTupleDatum(TupleTableSlot *slot)
+{
+	HeapTuple	tup;
+	HeapTupleHeader td;
+	TupleDesc	tupdesc;
+
+	/* Make sure we can scribble on the slot contents ... */
+	tup = ExecMaterializeSlot(slot);
+	/* ... and set up the composite-Datum header fields, in case not done */
+	td = tup->t_data;
+	tupdesc = slot->tts_tupleDescriptor;
+	HeapTupleHeaderSetDatumLength(td, tup->t_len);
+	HeapTupleHeaderSetTypeId(td, tupdesc->tdtypeid);
+	HeapTupleHeaderSetTypMod(td, tupdesc->tdtypmod);
+	return PointerGetDatum(td);
 }
 
 #endif

@@ -13,13 +13,15 @@
 #include "fmgr.h"
 #include "utils/tuplestore.h"
 
+#ifndef PGDLLEXPORT
+
 #ifndef WIN32
 
-#define PGUT_EXPORT
+#define PGDLLEXPORT
 
 #else
 
-#define PGUT_EXPORT		__declspec(dllexport)
+#define PGDLLEXPORT		__declspec(dllexport)
 
 /*
  * PG_MODULE_MAGIC and PG_FUNCTION_INFO_V1 macros seems to be broken.
@@ -29,7 +31,7 @@
 
 #undef PG_MODULE_MAGIC
 #define PG_MODULE_MAGIC \
-extern PGUT_EXPORT const Pg_magic_struct *PG_MAGIC_FUNCTION_NAME(void); \
+extern PGDLLEXPORT const Pg_magic_struct *PG_MAGIC_FUNCTION_NAME(void); \
 const Pg_magic_struct * \
 PG_MAGIC_FUNCTION_NAME(void) \
 { \
@@ -40,7 +42,7 @@ extern int no_such_variable
 
 #undef PG_FUNCTION_INFO_V1
 #define PG_FUNCTION_INFO_V1(funcname) \
-extern PGUT_EXPORT const Pg_finfo_record * CppConcat(pg_finfo_,funcname)(void); \
+extern PGDLLEXPORT const Pg_finfo_record * CppConcat(pg_finfo_,funcname)(void); \
 const Pg_finfo_record * \
 CppConcat(pg_finfo_,funcname) (void) \
 { \
@@ -51,6 +53,7 @@ extern int no_such_variable
 
 #endif
 
+#endif
 
 #if PG_VERSION_NUM < 80300
 
@@ -60,6 +63,7 @@ extern int no_such_variable
 #define MaxHeapTupleSize			MaxTupleSize
 
 #define PG_GETARG_TEXT_PP(n)		PG_GETARG_TEXT_P(n)
+#define PG_GETARG_BPCHAR_PP(n)		PG_GETARG_BPCHAR_P(n)
 #define VARSIZE_ANY_EXHDR(v)		(VARSIZE(v) - VARHDRSZ)
 #define VARDATA_ANY(v)				VARDATA(v)
 #define SET_VARSIZE(v, sz)			(VARATT_SIZEP(v) = (sz))
@@ -74,7 +78,7 @@ extern int no_such_variable
 #define ItemIdIsDead(itemId)		ItemIdDeleted(itemId)
 #define GetCurrentCommandId(used)	GetCurrentCommandId()
 #define stringToQualifiedNameList(str) \
-    stringToQualifiedNameList((str), "pg_bulkload")
+    stringToQualifiedNameList((str), "")
 #define PageAddItem(page, item, size, offnum, overwrite, is_heap) \
 	PageAddItem((page), (item), (size), (offnum), LP_USED)
 
@@ -82,7 +86,7 @@ extern int no_such_variable
 
 #if PG_VERSION_NUM < 80400
 
-#define MAIN_FORKNUM				0
+#define MAIN_FORKNUM			0
 #define HEAP_INSERT_SKIP_WAL	0x0001
 #define HEAP_INSERT_SKIP_FSM	0x0002
 
@@ -100,29 +104,12 @@ extern int no_such_variable
 #define pgstat_end_function_usage(fcu, finalize)	((void)0)
 #define makeRangeVar(schemaname, relname, location) \
 	makeRangeVar((schemaname), (relname))
+#define tuplestore_gettupleslot(state, forward, copy, slot) \
+	tuplestore_gettupleslot(state, forward, slot)
 #define pgstat_track_activity_query_size	PGBE_ACTIVITY_SIZE
+#define tbm_add_tuples(tbm, tids, ntids, recheck) \
+	tbm_add_tuples((tbm), (tids), (ntids))
 typedef void *BulkInsertState;
-
-#define DefineCustomBoolVariable(name, short_desc, long_desc, valueAddr, bootValue, context, flags, assign_hook, show_hook) \
-	do { \
-		*(valueAddr) = (bootValue); \
-		DefineCustomBoolVariable((name), (short_desc), (long_desc), (valueAddr), (context), (assign_hook), (show_hook)); \
-	} while(0)
-#define DefineCustomIntVariable(name, short_desc, long_desc, valueAddr, bootValue, minValue, maxValue, context, flags, assign_hook, show_hook) \
-	do { \
-		*(valueAddr) = (bootValue); \
-		DefineCustomIntVariable((name), (short_desc), (long_desc), (valueAddr), (minValue), (maxValue), (context), (assign_hook), (show_hook)); \
-	} while(0)
-#define DefineCustomRealVariable(name, short_desc, long_desc, valueAddr, bootValue, minValue, maxValue, context, flags, assign_hook, show_hook) \
-	do { \
-		*(valueAddr) = (bootValue); \
-		DefineCustomRealVariable((name), (short_desc), (long_desc), (valueAddr), (minValue), (maxValue), (context), (assign_hook), (show_hook)); \
-	} while(0)
-#define DefineCustomStringVariable(name, short_desc, long_desc, valueAddr, bootValue, context, flags, assign_hook, show_hook) \
-	do { \
-		*(valueAddr) = (char *) (bootValue); \
-		DefineCustomStringVariable((name), (short_desc), (long_desc), (valueAddr), (context), (assign_hook), (show_hook)); \
-	} while(0)
 
 struct config_enum_entry
 {
@@ -133,8 +120,10 @@ struct config_enum_entry
 
 extern char *text_to_cstring(const text *t);
 extern text *cstring_to_text(const char *s);
+extern text *cstring_to_text_with_len(const char *s, int len);
 extern void tuplestore_putvalues(Tuplestorestate *state, TupleDesc tdesc,
 					 Datum *values, bool *isnull);
+extern Datum ExecFetchSlotTupleDatum(TupleTableSlot *slot);
 
 #define CStringGetTextDatum(s)		PointerGetDatum(cstring_to_text(s))
 #define TextDatumGetCString(d)		text_to_cstring((text *) DatumGetPointer(d))
@@ -147,10 +136,28 @@ extern void tuplestore_putvalues(Tuplestorestate *state, TupleDesc tdesc,
 	reindex_index((indexId))
 #define func_signature_string(funcname, nargs, argnames, argtypes) \
 	func_signature_string((funcname), (nargs), (argtypes))
-#define GetConfigOption(name, restrict_superuser)	GetConfigOption((name))
 
 #endif
 
+#if PG_VERSION_NUM < 90100
+
+#define relpathperm		relpath
+#define SearchSysCache1(cacheId, key1) \
+	SearchSysCache(cacheId, key1, 0, 0, 0)
+#define PG_GET_COLLATION()		(InvalidOid)
+
+#endif
+
+#if PG_VERSION_NUM < 90200
+
+#define RangeVarGetRelid(relation, lockmode, missing_ok, nowait) \
+	RangeVarGetRelid((relation), (missing_ok))
+#define get_variable_numdistinct(vardata, isdefault) \
+	(*(isdefault) = false, get_variable_numdistinct((vardata)))
+
+#endif
+
+/* RelationSetNewRelfilenode */
 #if PG_VERSION_NUM < 80300
 #define RelationSetNewRelfilenode(rel, xid) \
 	setNewRelfilenode((rel))
@@ -159,12 +166,76 @@ extern void tuplestore_putvalues(Tuplestorestate *state, TupleDesc tdesc,
 	setNewRelfilenode((rel), (xid))
 #endif
 
+/* FuncnameGetCandidates */
 #if PG_VERSION_NUM < 80400
 #define FuncnameGetCandidates(names, nargs, argnames, variadic, defaults) \
 	FuncnameGetCandidates((names), (nargs))
 #elif PG_VERSION_NUM < 90000
 #define FuncnameGetCandidates(names, nargs, argnames, variadic, defaults) \
 	FuncnameGetCandidates((names), (nargs), (variadic), (defaults))
+#endif
+
+/* GetConfigOption */
+#if PG_VERSION_NUM < 90000
+#define GetConfigOption(name, missing_ok, restrict_superuser) \
+	GetConfigOption((name))
+#elif PG_VERSION_NUM < 90200
+#define GetConfigOption(name, missing_ok, restrict_superuser) \
+	GetConfigOption((name), (restrict_superuser))
+#endif
+
+/* DefineCustom____Variable */
+#if PG_VERSION_NUM < 80400
+#define DefineCustomBoolVariable(name, short_desc, long_desc, valueAddr, bootValue, context, flags, check_hook, assign_hook, show_hook) \
+	do { \
+		Assert(check_hook == NULL); \
+		*(valueAddr) = (bootValue); \
+		DefineCustomBoolVariable((name), (short_desc), (long_desc), (valueAddr), (context), (assign_hook), (show_hook)); \
+	} while(0)
+#define DefineCustomIntVariable(name, short_desc, long_desc, valueAddr, bootValue, minValue, maxValue, context, flags, check_hook, assign_hook, show_hook) \
+	do { \
+		Assert(check_hook == NULL); \
+		*(valueAddr) = (bootValue); \
+		DefineCustomIntVariable((name), (short_desc), (long_desc), (valueAddr), (minValue), (maxValue), (context), (assign_hook), (show_hook)); \
+	} while(0)
+#define DefineCustomRealVariable(name, short_desc, long_desc, valueAddr, bootValue, minValue, maxValue, context, flags, check_hook, assign_hook, show_hook) \
+	do { \
+		Assert(check_hook == NULL); \
+		*(valueAddr) = (bootValue); \
+		DefineCustomRealVariable((name), (short_desc), (long_desc), (valueAddr), (minValue), (maxValue), (context), (assign_hook), (show_hook)); \
+	} while(0)
+#define DefineCustomStringVariable(name, short_desc, long_desc, valueAddr, bootValue, context, flags, check_hook, assign_hook, show_hook) \
+	do { \
+		Assert(check_hook == NULL); \
+		*(valueAddr) = (char *) (bootValue); \
+		DefineCustomStringVariable((name), (short_desc), (long_desc), (valueAddr), (context), (assign_hook), (show_hook)); \
+	} while(0)
+#elif PG_VERSION_NUM < 90100
+#define DefineCustomBoolVariable(name, short_desc, long_desc, valueAddr, bootValue, context, flags, check_hook, assign_hook, show_hook) \
+	do { \
+		Assert(check_hook == NULL); \
+		DefineCustomBoolVariable((name), (short_desc), (long_desc), (valueAddr), (bootValue), (context), (flags), (assign_hook), (show_hook)); \
+	} while(0)
+#define DefineCustomIntVariable(name, short_desc, long_desc, valueAddr, bootValue, minValue, maxValue, context, flags, check_hook, assign_hook, show_hook) \
+	do { \
+		Assert(check_hook == NULL); \
+		DefineCustomIntVariable((name), (short_desc), (long_desc), (valueAddr), (bootValue), (minValue), (maxValue), (context), (flags), (assign_hook), (show_hook)); \
+	} while(0)
+#define DefineCustomRealVariable(name, short_desc, long_desc, valueAddr, bootValue, minValue, maxValue, context, flags, check_hook, assign_hook, show_hook) \
+	do { \
+		Assert(check_hook == NULL); \
+		DefineCustomRealVariable((name), (short_desc), (long_desc), (valueAddr), (bootValue), (minValue), (maxValue), (context), (flags), (assign_hook), (show_hook)); \
+	} while(0)
+#define DefineCustomStringVariable(name, short_desc, long_desc, valueAddr, bootValue, context, flags, check_hook, assign_hook, show_hook) \
+	do { \
+		Assert(check_hook == NULL); \
+		DefineCustomStringVariable((name), (short_desc), (long_desc), (valueAddr), (bootValue), (context), (flags), (assign_hook), (show_hook)); \
+	} while(0)
+#define DefineCustomEnumVariable(name, short_desc, long_desc, valueAddr, bootValue, options, context, flags, check_hook, assign_hook, show_hook) \
+	do { \
+		Assert(check_hook == NULL); \
+		DefineCustomEnumVariable((name), (short_desc), (long_desc), (valueAddr), (bootValue), (options), (context), (flags), (assign_hook), (show_hook)); \
+	} while(0)
 #endif
 
 #endif   /* PGUT_BE_H */
