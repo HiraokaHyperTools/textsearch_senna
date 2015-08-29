@@ -72,7 +72,7 @@
 #error You need egcs 1.1 or newer for compiling!
 #endif
 
-#ifdef BUILDING_DLL
+#if defined(BUILDING_DLL) && !defined(_MSC_VER)
 #define PGDLLIMPORT __declspec (dllexport)
 #else							/* not BUILDING_DLL */
 #define PGDLLIMPORT __declspec (dllimport)
