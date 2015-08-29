@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ja" lang="ja">
+	<head>
+	<link rel="icon" type="image/png" href="http://pgfoundry.org/images/elephant-icon.png" />
+	<link rel="stylesheet" type="text/css" href="style.css" />
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+	<title>textsearch_senna</title>
+</head>
+
+<body>
+<center>
+<img style="border: none; margin-left: auto; margin-right: auto; " src="http://pgfoundry.org/images/elephantSmall.png" height="75" width="75" />
+<hr />
+<h1>textsearch_senna : N-gram方式 全文検索</h1>
+</center>
+<div class="navigation"><a href="index-ja.html">Top</a> &gt; <a href="textsearch_senna.html">textsearch_senna</a><div>
+<hr />
+<p>N-gram を使用した、組み込み型の日本語全文検索です。</p>
+<ul>
+	<li><a href="http://pgfoundry.org/frs/?group_id=1000298">ダウンロード</a> : ソースコードのほか、Windows 用バイナリもダウンロードできます。</li>
+	<li><a href="http://pgfoundry.org/tracker/?group_id=1000298">バグレポート</li></li>
+	<li><a href="http://pgfoundry.org/mail/?group_id=1000298">メーリングリスト</a> への参加</li>
+</ul>
+<hr />
+
+<ol>
+	<li><a href="#abstract">概要</a></li>
+	<li><a href="#install">インストール</a></li>
+	<li><a href="#tsearch">テキスト検索機能</a><ul>
+		<li><a href="#percent">%% 演算子</a></li>
+		<li><a href="#atmark">@@ 演算子</a></li>
+		<li><a href="#index">インデックス (senna)</a></li>
+		<li><a href="#like">LIKE インデックス</a></li>
+		<li><a href="#reloptions">インデックス・オプション (WITH)</a></li>
+	</ul></li>
+	<li><a href="#maintenance">インデックスのメンテナンス</a><ul>
+		<li><a href="#drop">senna.drop_index()</a></li>
+		<li><a href="#reindex">senna.reindex_index()</a></li>
+		<li><a href="#files">不要ファイルの調査</a></li>
+		<li><a href="#statistics">統計情報は不要</a></li>
+	</ul></li>
+	<li><a href="#todo">TODO</a></li>
+</ol>
+
+<hr />
+
+<h2 id="abstract">概要</h2>
+<p>日本語テキストの全文検索を行います。
+形態素解析ベースである <a href="textsearch_ja.html">textsearch-ja</a> とは異なり、textsearch_senna では N-gram ベースの全文検索を行います。
+検索には、全文検索エンジン <a href="http://qwik.jp/senna/FrontPageJ.html">Senna</a> を使用しています。
+</p>
+<p>利点として、文字すべてをインデックス化するため LIKE 中間一致検索に近い結果を得ることができます。
+検索用インデックスには、専用の検索演算子の他、LIKE 演算子をそのまま使うこともできます。
+また、既に tsearch2 互換のインタフェースを備えるため、少々の設定変更で textsearch-ja と textsearch_senna を切り替えて使用することができます。
+</p>
+<p>
+ただし、クラッシュ・リカバリやアーカイブ・リカバリに対応していないことに注意してください。リカバリ後にインデックスの再作成を行う必要があります。
+</p>
+
+<h2 id="install">インストール</h2>
+<h3 id="dependency">依存関係</h3>
+<p>
+以下の外部プロジェクトに依存しています。
+</p>
+<ul>
+	<li><a href="http://www.postgresql.org/">PostgreSQL</a> : 8.2 以降</li>
+	<li><a href="http://qwik.jp/senna/Download.html">Senna</a> : 1.1.5 で動作確認。MeCab は不要です。
+		Windows 用バイナリはダウンロードページで配布しています。
+		Senna の過去のバージョン (～1.1.4) は、特定の文字を挿入するとクラッシュし、PostgreSQL を巻き込んで停止してしまいます。
+		できるかぎり最新版を使ってください。
+	</li>
+</ul>
+
+<h3 id="build">ビルド</h3>
+<p>
+最初に senna をビルドします。
+詳しくは Senna の<a href="http://qwik.jp/senna/install.html">インストール方法</a>を参照してください。
+環境によっては make に長時間 (数分～数10分) かかる場合があるようです。
+</p>
+<p>
+textsearch_senna は pgxs を使ってビルドできます。
+</p>
+<pre>$ cd textsearch_senna
+$ make USE_PGXS=1
+$ su
+$ make USE_PGXS=1 install</pre>
+
+<p>その後、データベースに関数を登録します。</p>
+<pre>$ pg_ctl start
+$ psql -f $PGSHARE/contrib/textsearch_senna.sql your_database</pre>
+
+<h3 id="windows">Windowsへのインストール</h3>
+<p>
+Windows へバイナリをインストールするには、PostgreSQL をインストールしたフォルダ (通常は C:\Program Files\PostgreSQL\*.*, 以下 %PGHOME%) へファイルを展開します。
+libsenna.dll を %PGHOME%\bin またはパスの通ったフォルダ (%WINDOWS% 等) に、textsearch_senna.dll を %PGHOME%\lib に配置します。
+その後、textsearch_senna.sql によるデータベースへの登録を行います。
+</p>
+
+<h2 id="tsearch">テキスト検索機能</h2>
+<h3 id="percent">%% 演算子</h3>
+<p>OPERATOR %% (document text, query text) が追加されます。
+以下の形式で使用します。</p>
+<pre>=# SELECT * FROM tbl WHERE document %% '検索キーワード';</pre>
+
+<h3 id="atmark">@@ 演算子</h3>
+<p>組み込みの全文検索との互換性向上のため、OPERATOR @@ (document text, query senquery) も登録されています。</p>
+<pre>=# SELECT * FROM tbl WHERE senna.to_tsvector(document) @@ senna.to_tsquery('検索キーワード');</pre>
+<p>
+senna.to_tsvector(), senna.to_tsquery() を組み込みの同名の関数よりも優先して使用する場合は、設定パラメータ search_path を 'senna', 'pg_catalog' の順に検索するよう設定します。
+</p>
+<pre>=# SET search_path = 'senna','pg_catalog','$user','public';
+=# SELECT * FROM tbl WHERE to_tsvector(document) @@ to_tsquery('検索キーワード');
+</pre>
+
+<h3 id="index">インデックス (senna)</h3>
+<p>'senna' というインデックス・アクセス・メソッドが登録されます。
+CREATE INDEX の際に USING senna を指定することで使用できます。</p>
+<pre>=# CREATE TABLE test (id serial, t text);
+=# COPY test(t) FROM '...';
+=# CREATE INDEX idx ON test USING senna (t);
+=# ANALYZE;
+=# EXPLAIN SELECT * FROM test WHERE t %% 'リレーショナルデータベース';
+                             QUERY PLAN
+--------------------------------------------------------------------
+ Index Scan using idx on test  (cost=0.00..55.01 rows=615 width=36)
+   Index Cond: (t %% 'リレーショナルデータベース'::text)
+(2 rows)</pre>
+
+<h3 id="like">LIKE インデックス</h3>
+<p>LIKE 演算子でインデックスを使うためには、<code>like_ops</code> 演算子クラスを指定します。
+LIKE の中間一致検索 (LIKE '%foo%') であってもインデックスが利用できます。</p>
+
+<pre>=# CREATE TABLE test (id serial, t text);
+=# COPY test(t) FROM '...';
+=# CREATE INDEX idx_like ON test USING senna (t like_ops);
+=# ANALYZE;
+=# EXPLAIN SELECT * FROM test WHERE t LIKE '%リレーショナルデータベース%';
+                                QUERY PLAN
+-------------------------------------------------------------------------
+ Index Scan using idx_like on test  (cost=0.00..55.01 rows=615 width=36)
+   Index Cond: (t ~~ '%リレーショナルデータベース%'::text)
+(2 rows)</pre>
+
+<p>デフォルトの演算子クラス (senna_ops) では LIKE 検索はできませんが、英数字は単語単位でインデックス化するため、インデックスのサイズが比較的小さくなり、検索も効率的です。
+一方、LIKE 検索用の演算子クラス (like_ops) は英数字も各文字ごとにインデックス化するため、LIKE 演算子と同じ検索結果になりますが、性能や効率は若干劣ります。
+用途に応じて使い分けて下さい。</p>
+
+<h3 id="reloptions">インデックス・オプション (WITH)</h3>
+<p>
+CREATE INDEX の際に WITH 句でインデックス・オプションを指定できます。
+</p>
+<dl>
+<dt>initial_n_segments (integer)</dt>
+<dd>初期インデックスとして確保するバッファサイズです。デフォルトは 512 です。
+以下のメッセージが出力された場合には値を増やしてください。
+<pre>WARNING:  senna: [CRITICAL] index full. set bigger value to initial_n_segments.</pre>
+ALTER INDEX を使って作成済みのインデックスに再設定しても反映されず、senna.reindex_index() 等でインデックスを再作成する必要があります。
+文書サイズが大きい等、単語数が多くなることが予想される場合には、予め 2048 程度まで増やすことを検討してください。
+詳細は <a href="http://qwik.jp/senna/APIJ.html">Senna のドキュメント</a>を参照してください。
+</dd>
+</dl>
+
+<h2 id="maintenance">インデックスのメンテナンス</h2>
+<p>Senna インデックスは標準 DROP INDEX や REINDEX REINDEX ではなく、専用の関数を使ってメンテナンスを行ってください。インデックスの削除が発生する可能性のあるSQLは以下になります。これらを実行すると、不要ファイルが残ってしまいます。</p>
+<ul>
+<li>DROP INDEX / TABLE</li>
+<li>TRUNCATE TABLE</li>
+<li>ALTER TABLE (テーブルの書き換えが発生する場合)</li>
+<li>CLUSTER</li>
+<li>REINDEX INDEX / TABLE / DATABASE</li>
+<li>VACUUM FULL (PostgreSQL 9.0 以降)</li>
+</ul>
+
+<p>特に、データベース全体への VACUUM FULL, REINDEX, CLUSTER で不要ファイルを残してしまいがちなので注意してください。</p>
+
+<h3 id="drop">senna.drop_index()</h3>
+<p>DROP INDEX の代わりに senna.drop_index() 関数を使ってください。</p>
+<pre>=# SELECT senna.drop_index('index_name');</pre>
+
+<h3 id="reindex">senna.reindex_index()</h3>
+<p>REINDEX の代わりに senna.reindex_index() 関数を使ってください。</p>
+<pre>=# SELECT senna.reindex_index('index_name');</pre>
+
+<h3 id="files">不要ファイルの調査</h3>
+<p>textsearch_senna が利用する Senna ライブラリは、PostgreSQL 標準のインデックス・ファイルのほかに、以下のファイルを利用します。インデックス・ファイルが削除される際には、これらのファイルも削除する必要があります。不要ファイルは残っていてもデータアクセスには問題ありませんが、ディスクの容量が無駄になります。</p>
+<ul>
+<li>(relfilenode).SEN</li>
+<li>(relfilenode).SEN.i</li>
+<li>(relfilenode).SEN.i.c</li>
+<li>(relfilenode).SEN.l</li>
+</ul>
+<p>残ってしまった不要ファイルを調査するために、以下のビューを用意しています。</p>
+<pre>CREATE VIEW senna.all_files;    -- 全てのデータベース・ファイル
+CREATE VIEW senna.index_files;  -- 全ての senna インデックス・ファイル
+CREATE VIEW senna.orphan_files; -- 不要な senna インデックス・ファイル</pre>
+<p>不要ファイルを削除するには、contrib/<a href="http://www.postgresql.jp/document/current/html/adminpack.html">adminpack</a> をインストールした上で、下記のSQLを発行します。</p>
+<pre>=# CHECKPOINT; -- PostgreSQL のファイルを削除するため。
+=# SELECT pg_file_unlink(file) FROM senna.orphan_files;</pre>
+
+<h3 id="statistics">統計情報は不要</h3>
+<p>
+senna インデックスは <a>ANALYZE</a> で収集される統計情報を利用しません。
+そのため、統計情報ヒストグラムを作成しないように設定することで、ディスク容量やCPUコストを節約できます。
+senna インデックスを張ったカラムのみ統計情報を収集しないように設定するには、<a href="http://www.postgresql.jp/document/current/html/sql-altertable.html">ALTER TABLE SET STATISTICS</a> を使います。
+</p>
+<pre>=# ALTER TABLE tbl ALTER COLUMN document SET STATISTICS 0;</pre>
+
+<h2 id="todo">TODO</h2>
+<dl>
+	<dt>text, varchar, char 以外の型のサポート</dt>
+	<dd>現在は、上記の文字列型のみ対応しています。</dd>
+	<dt>マルチカラム・インデックスのサポート</dt>
+	<dd>現在は、シングルカラム・インデックスのみ対応しています。</dd>
+	<dt>シノニム, ストップワード対応</dt>
+	<dd>textsearch-ja と共用できるようにすべきです。</dd>
+	<dt>ファイル削除をSQLと連動させる</dt>
+	<dd>PostgreSQL 母体の拡張が必要です。amdropindex?</dd>
+</dl>
+
+<hr />
+<div class="navigation"><a href="index-ja.html">Top</a> &gt; <a href="textsearch_senna.html">textsearch_senna</a><div>
+<div align="right">
+Copyright (c) 2008-2010, NIPPON TELEGRAPH AND TELEPHONE CORPORATION
+</div>
+<!-- PLEASE LEAVE "Powered By GForge" on your site -->
+<br />
+<center>
+<a href="http://gforge.org/"><img src="http://gforge.org/images/pow-gforge.png" 
+alt="Powered By GForge Collaborative Development Environment" border="0" /></a>
+</center>
+
+</body>
+</html>

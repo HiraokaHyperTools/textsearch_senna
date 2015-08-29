@@ -1,0 +1,188 @@
+SET search_path = public;
+
+CREATE FUNCTION public.pg_sync_file(text) RETURNS void
+	AS 'MODULE_PATHNAME', 'pg_sync_file'
+	LANGUAGE C STRICT;
+
+BEGIN;
+
+CREATE FUNCTION senquery_in(cstring) RETURNS senquery
+	AS 'textin' LANGUAGE internal STRICT IMMUTABLE;
+
+CREATE FUNCTION senquery_out(senquery) RETURNS cstring
+	AS 'textout' LANGUAGE internal STRICT IMMUTABLE;
+
+CREATE FUNCTION senquery_recv(internal) RETURNS senquery
+	AS 'textin' LANGUAGE internal STRICT IMMUTABLE;
+
+CREATE FUNCTION senquery_send(senquery) RETURNS bytea
+	AS 'textout' LANGUAGE internal STRICT IMMUTABLE;
+
+CREATE FUNCTION char_senquery(char) RETURNS senquery
+	AS 'char_text' LANGUAGE internal STRICT IMMUTABLE;
+
+CREATE TYPE senquery (
+	INPUT = senquery_in,
+	OUTPUT = senquery_out,
+	RECEIVE = senquery_recv,
+	SEND = senquery_send,
+	INTERNALLENGTH = VARIABLE,
+	ALIGNMENT = int4,
+	STORAGE = extended
+);
+
+CREATE CAST (text AS senquery) WITHOUT FUNCTION;
+CREATE CAST (varchar AS senquery) WITHOUT FUNCTION;
+CREATE CAST (char AS senquery) WITH FUNCTION char_senquery(char);
+
+CREATE SCHEMA senna;
+
+CREATE FUNCTION senna.to_tsvector(regconfig, text) RETURNS text
+	AS 'SELECT $2'
+	LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE FUNCTION senna.to_tsvector(text) RETURNS text
+	AS 'SELECT $1'
+	LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE FUNCTION senna.to_tsquery(regconfig, text) RETURNS senquery
+	AS 'SELECT $2::senquery'
+	LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE FUNCTION senna.to_tsquery(text) RETURNS senquery
+	AS 'SELECT $1::senquery'
+	LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE FUNCTION senna.drop_index(regclass) RETURNS void
+	AS 'MODULE_PATHNAME', 'senna_drop_index'
+	LANGUAGE C STRICT;
+
+CREATE FUNCTION senna.reindex_index(regclass) RETURNS void
+	AS 'MODULE_PATHNAME', 'senna_reindex_index'
+	LANGUAGE C STRICT;
+
+CREATE FUNCTION senna.contains(text, text) RETURNS bool
+	AS 'MODULE_PATHNAME', 'senna_contains'
+	LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION senna.contains(text, senquery) RETURNS bool
+	AS 'MODULE_PATHNAME', 'senna_contains'
+	LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION senna.contained(senquery, text) RETURNS bool
+	AS 'MODULE_PATHNAME', 'senna_contained'
+	LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION senna.restsel(internal, oid, internal, integer) RETURNS float8
+	AS 'MODULE_PATHNAME', 'senna_restsel'
+	LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OPERATOR %% (
+	PROCEDURE = senna.contains,
+	LEFTARG = text,
+	RIGHTARG = text,
+	RESTRICT = senna.restsel
+);
+
+CREATE OPERATOR @@ (
+	PROCEDURE = senna.contains,
+	LEFTARG = text,
+	RIGHTARG = senquery,
+	COMMUTATOR = @@,
+	RESTRICT = senna.restsel
+);
+
+CREATE OPERATOR @@ (
+	PROCEDURE = senna.contained,
+	LEFTARG = senquery,
+	RIGHTARG = text,
+	COMMUTATOR = @@,
+	RESTRICT = senna.restsel
+);
+
+CREATE FUNCTION senna_insert(internal) RETURNS bool AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_beginscan(internal) RETURNS internal AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_gettuple(internal) RETURNS bool AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_getmulti(internal) RETURNS int8 AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_rescan(internal) RETURNS void AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_endscan(internal) RETURNS void AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_build(internal) RETURNS internal AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_bulkdelete(internal) RETURNS internal AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_vacuumcleanup(internal) RETURNS internal AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_costestimate(internal) RETURNS internal AS 'MODULE_PATHNAME' LANGUAGE C;
+CREATE FUNCTION senna_options(internal) RETURNS internal AS 'MODULE_PATHNAME' LANGUAGE C;
+
+INSERT INTO pg_catalog.pg_am VALUES(
+	'senna',	-- amname
+	4,			-- amstrategies
+	0,			-- amsupport
+	false,		-- amcanorder
+	false,		-- amcanunique
+	false,		-- amcanmulticol
+	false,		-- amoptionalkey
+	false,		-- amindexnulls
+	false,		-- amsearchnulls
+	false,		-- amstorage
+	false,		-- amclusterable
+	'senna_insert',
+	'senna_beginscan',
+	'senna_gettuple',
+	'senna_getmulti',
+	'senna_rescan',
+	'senna_endscan',
+	0,	-- ammarkpos,
+	0,	-- amrestrpos,
+	'senna_build',
+	'senna_bulkdelete',
+	'senna_vacuumcleanup',
+	'senna_costestimate',
+	'senna_options'
+);
+
+CREATE OPERATOR CLASS senna_ops DEFAULT FOR TYPE text USING senna AS
+		OPERATOR 1 @@ (text, senquery),
+		OPERATOR 2 %% (text, text)
+;
+
+-- same as LIKE (~~)
+CREATE OPERATOR ~~% (
+	PROCEDURE = pg_catalog.textlike,
+	LEFTARG = text,
+	RIGHTARG = text,
+	COMMUTATOR = !~~,
+	RESTRICT = pg_catalog.likesel,
+	JOIN = pg_catalog.likejoinsel
+);
+
+CREATE OPERATOR CLASS like_ops FOR TYPE text USING senna AS
+		OPERATOR 3 ~~% (text, text) RECHECK
+;
+
+CREATE VIEW senna.all_files AS
+  SELECT CASE WHEN NOT (pg_stat_file(dir)).isdir
+         THEN dir
+         ELSE dir || '/' || pg_ls_dir(dir)
+         END AS file
+    FROM (SELECT 'base/' || dir AS dir
+            FROM pg_ls_dir('base') AS base(dir)
+         UNION ALL
+         (SELECT 'pg_tblspc/' || tbs || '/' || pg_ls_dir('pg_tblspc/' || tbs) AS dir
+            FROM pg_ls_dir('pg_tblspc') AS tblspc(tbs))) AS t
+   WHERE dir NOT LIKE '%/pgsql_tmp';
+
+CREATE VIEW senna.index_files AS
+  SELECT file FROM senna.all_files WHERE file LIKE '%.SEN%';
+
+CREATE VIEW senna.orphan_files AS
+  SELECT a.file FROM senna.all_files a,
+     (SELECT min(file) AS file,
+             substring(file from E'^(.*/[0-9]+)[^/]*$') AS base
+        FROM senna.all_files GROUP BY base) g
+  WHERE g.file LIKE '%.SEN%'
+    AND substring(a.file from E'^(.*/[0-9]+)[^/]*$') = g.base;
+
+CREATE FUNCTION senna.checkpoint() RETURNS void AS
+$$SELECT pg_sync_file(file) FROM senna.index_files$$
+LANGUAGE sql;
+
+COMMIT;
