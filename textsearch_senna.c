@@ -254,6 +254,38 @@ static int RELOPT_KIND_SENNA;
 	 ((SennaOptions *) (relation)->rd_options)->initial_n_segments : \
 	 DEFAULT_INITIAL_N_SEGMENTS)
 
+#if PG_VERSION_NUM < 80300
+/* copied from src/backend/utils/adt/varlena.c (9.4) */
+
+/*
+ * text_to_cstring
+ *
+ * Create a palloc'd, null-terminated C string from a text value.
+ *
+ * We support being passed a compressed or toasted text value.
+ * This is a bit bogus since such values shouldn't really be referred to as
+ * "text *", but it seems useful for robustness.  If we didn't handle that
+ * case here, we'd need another routine that did, anyway.
+ */
+char *
+text_to_cstring(const text *t)
+{
+	/* must cast away the const, unfortunately */
+	text	   *tunpacked = pg_detoast_datum_packed((struct varlena *) t);
+	int			len = VARSIZE_ANY_EXHDR(tunpacked);
+	char	   *result;
+
+	result = (char *) palloc(len + 1);
+	memcpy(result, VARDATA_ANY(tunpacked), len);
+	result[len] = '\0';
+
+	if (tunpacked != t)
+		pfree(tunpacked);
+
+	return result;
+}
+#endif
+
 /* copied from adt/genfile.c */
 static char *
 convert_and_check_filename(text *arg)
