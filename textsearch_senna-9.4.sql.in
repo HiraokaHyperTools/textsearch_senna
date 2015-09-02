@@ -1,10 +1,7 @@
-SET search_path = public;
 
-CREATE FUNCTION public.pg_sync_file(text) RETURNS void
+CREATE FUNCTION pg_sync_file(text) RETURNS void
 	AS 'MODULE_PATHNAME', 'pg_sync_file'
 	LANGUAGE C STRICT;
-
-BEGIN;
 
 CREATE FUNCTION senquery_in(cstring) RETURNS senquery
 	AS 'textin' LANGUAGE internal STRICT IMMUTABLE;
@@ -35,69 +32,67 @@ CREATE CAST (text AS senquery) WITHOUT FUNCTION;
 CREATE CAST (varchar AS senquery) WITHOUT FUNCTION;
 CREATE CAST (char AS senquery) WITH FUNCTION char_senquery(char);
 
-CREATE SCHEMA senna;
-
-CREATE FUNCTION senna.to_tsvector(regconfig, text) RETURNS text
+CREATE FUNCTION @extschema@.to_tsvector(regconfig, text) RETURNS text
 	AS 'SELECT $2'
 	LANGUAGE sql IMMUTABLE STRICT;
 
-CREATE FUNCTION senna.to_tsvector(text) RETURNS text
+CREATE FUNCTION @extschema@.to_tsvector(text) RETURNS text
 	AS 'SELECT $1'
 	LANGUAGE sql IMMUTABLE STRICT;
 
-CREATE FUNCTION senna.to_tsquery(regconfig, text) RETURNS senquery
+CREATE FUNCTION @extschema@.to_tsquery(regconfig, text) RETURNS senquery
 	AS 'SELECT $2::senquery'
 	LANGUAGE sql IMMUTABLE STRICT;
 
-CREATE FUNCTION senna.to_tsquery(text) RETURNS senquery
+CREATE FUNCTION @extschema@.to_tsquery(text) RETURNS senquery
 	AS 'SELECT $1::senquery'
 	LANGUAGE sql IMMUTABLE STRICT;
 
-CREATE FUNCTION senna.drop_index(regclass) RETURNS void
+CREATE FUNCTION @extschema@.drop_index(regclass) RETURNS void
 	AS 'MODULE_PATHNAME', 'senna_drop_index'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION senna.reindex_index(regclass) RETURNS void
+CREATE FUNCTION @extschema@.reindex_index(regclass) RETURNS void
 	AS 'MODULE_PATHNAME', 'senna_reindex_index'
 	LANGUAGE C STRICT;
 
-CREATE FUNCTION senna.contains(text, text) RETURNS bool
+CREATE FUNCTION @extschema@.contains(text, text) RETURNS bool
 	AS 'MODULE_PATHNAME', 'senna_contains'
 	LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION senna.contains(text, senquery) RETURNS bool
+CREATE FUNCTION @extschema@.contains(text, senquery) RETURNS bool
 	AS 'MODULE_PATHNAME', 'senna_contains'
 	LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION senna.contained(senquery, text) RETURNS bool
+CREATE FUNCTION @extschema@.contained(senquery, text) RETURNS bool
 	AS 'MODULE_PATHNAME', 'senna_contained'
 	LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION senna.restsel(internal, oid, internal, integer) RETURNS float8
+CREATE FUNCTION @extschema@.restsel(internal, oid, internal, integer) RETURNS float8
 	AS 'MODULE_PATHNAME', 'senna_restsel'
 	LANGUAGE C IMMUTABLE STRICT;
 
 CREATE OPERATOR %% (
-	PROCEDURE = senna.contains,
+	PROCEDURE = @extschema@.contains,
 	LEFTARG = text,
 	RIGHTARG = text,
-	RESTRICT = senna.restsel
+	RESTRICT = @extschema@.restsel
 );
 
 CREATE OPERATOR @@ (
-	PROCEDURE = senna.contains,
+	PROCEDURE = @extschema@.contains,
 	LEFTARG = text,
 	RIGHTARG = senquery,
 	COMMUTATOR = @@,
-	RESTRICT = senna.restsel
+	RESTRICT = @extschema@.restsel
 );
 
 CREATE OPERATOR @@ (
-	PROCEDURE = senna.contained,
+	PROCEDURE = @extschema@.contained,
 	LEFTARG = senquery,
 	RIGHTARG = text,
 	COMMUTATOR = @@,
-	RESTRICT = senna.restsel
+	RESTRICT = @extschema@.restsel
 );
 
 CREATE FUNCTION senna_insert(internal) RETURNS bool AS 'MODULE_PATHNAME' LANGUAGE C;
@@ -165,7 +160,7 @@ CREATE OPERATOR CLASS like_ops FOR TYPE text USING senna AS
 		OPERATOR 4 ~~ (text, text)
 ;
 
-CREATE VIEW senna.all_files AS
+CREATE VIEW @extschema@.all_files AS
   SELECT CASE WHEN NOT (pg_stat_file(dir)).isdir
          THEN dir
          ELSE dir || '/' || pg_ls_dir(dir)
@@ -177,18 +172,16 @@ CREATE VIEW senna.all_files AS
             FROM pg_ls_dir('pg_tblspc') AS tblspc(tbs))) AS t
    WHERE dir NOT LIKE '%/pgsql_tmp';
 
-CREATE VIEW senna.index_files AS
-  SELECT file FROM senna.all_files WHERE file LIKE '%.SEN%';
+CREATE VIEW @extschema@.index_files AS
+  SELECT file FROM @extschema@.all_files WHERE file LIKE '%.SEN%';
 
-CREATE VIEW senna.orphan_files AS
+CREATE VIEW @extschema@.orphan_files AS
   SELECT file FROM (SELECT file, min(file) OVER
       (PARTITION BY substring(file from E'^(.*/[0-9]+)[^/]*$')) base
-    FROM senna.all_files) t
+    FROM @extschema@.all_files) t
    WHERE file LIKE '%.SEN%'
      AND base LIKE '%.SEN%';
 
-CREATE FUNCTION senna.checkpoint() RETURNS void AS
-$$SELECT pg_sync_file(file) FROM senna.index_files$$
+CREATE FUNCTION @extschema@.checkpoint() RETURNS void AS
+$$SELECT @extschema@.pg_sync_file(file) FROM @extschema@.index_files$$
 LANGUAGE sql;
-
-COMMIT;

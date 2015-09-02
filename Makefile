@@ -7,8 +7,11 @@
 !ERROR CPU=x86 or CPU=x64
 !ENDIF
 
+VER=9.0.1
+
 BINDIR = bin\$(PGV)\$(CPU)
 OBJDIR = obj\$(PGV)\$(CPU)
+CP = copy
 !IF "$(CPU)" == "x86"
 CXX = "C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\bin\cl.exe"
 LINK = "C:\Program Files (x86)\Microsoft Visual Studio 11.0\VC\bin\link.exe"
@@ -50,3 +53,33 @@ $(BINDIR)\textsearch_senna.dll: $(OBJDIR)\textsearch_senna.obj
 clean:
 	rmdir /s /q $(OBJDIR)
 	rmdir /s /q $(BINDIR)
+
+PACKDIR = pack\textsearch_senna-$(VER)-postgresql-$(PGV)-$(CPU)
+
+pack: all \
+ $(PACKDIR)\bin \
+ $(PACKDIR)\lib \
+ $(PACKDIR)\bin\libsenna.dll \
+ $(PACKDIR)\lib\textsearch_senna.dll \
+ $(PACKDIR)\share\extension \
+ $(PACKDIR)\share\extension\textsearch_senna--9.0.1.sql \
+ $(PACKDIR)\share\extension\textsearch_senna.control
+
+$(PACKDIR)\bin:
+	mkdir $@
+$(PACKDIR)\lib:
+	mkdir $@
+$(PACKDIR)\share\extension:
+	mkdir $@
+
+$(PACKDIR)\bin\libsenna.dll: lib_$(CPU)\senna\libsenna.dll
+	$(CP) $** $@
+
+$(PACKDIR)\lib\textsearch_senna.dll: $(BINDIR)\textsearch_senna.dll
+	$(CP) $** $@
+
+$(PACKDIR)\share\extension\textsearch_senna--9.0.1.sql: textsearch_senna-$(PGV).sql.in
+	$(CP) $** $@
+
+$(PACKDIR)\share\extension\textsearch_senna.control: textsearch_senna.control
+	$(CP) $** $@

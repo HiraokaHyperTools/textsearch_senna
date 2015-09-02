@@ -1,0 +1,5 @@
+# textsearch_senna extension
+comment = 'textsearch_senna'
+default_version = '9.0.1'
+module_pathname = '$libdir/textsearch_senna'
+relocatable = false
